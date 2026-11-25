@@ -269,16 +269,23 @@ def main():
         if not (6 <= ahora.hour < 8) or ult == ahora.date().isoformat():
             print('Fuera de horario o ya actualizado hoy:', ahora.isoformat(timespec='minutes')); return
     pc, vc, fichas = camara()
-    ps, vs = senado()
+    ruta = os.path.join(OUT, 'congreso.json'); previo = json.load(open(ruta, encoding='utf-8')) if os.path.exists(ruta) else {}
+    try: ps, vs = senado(); sen_ok = True
+    except Exception as e:
+        h = getattr(e, 'headers', None) or {}
+        print('Senado sin respuesta:', e, '| server:', h.get('Server'), '| cf-ray:', h.get('cf-ray'))
+        if 'S' not in previo: raise
+        ps, vs, sen_ok = None, previo['S']['votos'], False
     limite = (ahora - dt.timedelta(days=30)).strftime('%Y-%m-%d')
     todos = {v['b'] for v in vc + vs if v['b']}
     recientes = {v['b'] for v in vc + vs if v['b'] and v['f'] >= limite}
     pr = proyectos(recientes, todos)
     for v in vs:
-        if v['b'] and v['b'] in pr: v['d'] = pr[v['b']]['t']
+        if sen_ok and v['b'] and v['b'] in pr: v['d'] = pr[v['b']]['t']
     for v in vc:
         if v['b'] and v['b'] in pr and v['d'].startswith('Bolet'): v['d'] = pr[v['b']]['t']
-    datos = {'actualizado': ahora.isoformat(timespec='minutes'), 'desde': DESDE.isoformat(), 'C': analizar(pc, vc, 'C'), 'S': analizar(ps, vs, 'S')}
+    datos = {'actualizado': ahora.isoformat(timespec='minutes'), 'desde': DESDE.isoformat(), 'C': analizar(pc, vc, 'C'), 'S': analizar(ps, vs, 'S') if sen_ok else previo['S']}
+    datos['act'] = {'C': datos['actualizado'], 'S': datos['actualizado'] if sen_ok else previo.get('act', {}).get('S', previo['actualizado'])}
     for b, f in fichas.items():
         if b in pr and f.get('ministerio'): pr[b]['min'] = f['ministerio']
     textos = {'b:' + b: pr[b]['t'] for b in todos if b in pr and pr[b].get('t')} | {'S:' + v['id']: v['art'] for v in vs if not v['b'] and v['art']}
