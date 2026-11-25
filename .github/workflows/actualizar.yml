@@ -1,0 +1,26 @@
+name: actualizar
+on:
+  schedule:
+    - cron: '0 9 * * *'   # 6:00 en horario de verano de Chile
+    - cron: '0 10 * * *'  # 6:00 en horario de invierno; el script descarta la que no corresponde
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  datos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install numpy anthropic
+      - env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python actualizar.py ${{ github.event_name == 'workflow_dispatch' && '--forzar' || '' }}
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add datos cache
+          git diff --cached --quiet || (git commit -m "Datos $(TZ=America/Santiago date +'%Y-%m-%d %H:%M')" && git push)
