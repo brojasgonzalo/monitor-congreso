@@ -16,6 +16,12 @@ SEN = 'https://web-back.senado.cl/api/'
 TRAM = 'https://tramitacion.senado.cl/wspublico/tramitacion.php?boletin='
 PARTIDOS_SEN = {'R.N.': 'RN', 'P.S.': 'PS', 'U.D.I.': 'UDI', 'P.P.D.': 'PPD', 'P.D.C.': 'DC', 'P.C': 'PC', 'P.C.': 'PC', 'Republicano': 'PREP', 'Evópoli': 'EVOP', 'Frente Amplio': 'FA', 'F.R.E.V.S.': 'FRVS', 'Demócratas': 'DEM', 'Nacional Libertario': 'PNL', 'Liberal': 'PL', 'Independiente': 'IND', 'P.R.': 'PR', 'Social Cristiano': 'PSC', 'De la Gente': 'PDG'}
 
+TIPOS_SEN = (('Acusación constitucional', r'acusaci[oó]n constitucional'), ('Designación', r'designaci|nombramiento|proposici[oó]n .*para (designar|nombrar)'), ('Proyecto de Acuerdo', r'proyecto de acuerdo'), ('Oficio presidencial', r'(oficio|solicitud).*(presidente|vicepresidente) de la rep'))
+PROMPT_ALIAS = ('Eres editor de un sitio que muestra las votaciones del Congreso de Chile. Para cada texto oficial (nombre de un proyecto de ley o descripción de una votación) '
+                'escribe un alias en español de Chile que diga de qué trata, para un lector general: de 2 a 7 palabras, sin punto final, sin siglas que no sean de uso común, '
+                'sin números de ley ni de boletín, sin verbos como "modifica" o "establece". Ejemplos: "Presupuesto 2027", "Prohibición de las carreras de perros", '
+                '"Acusación constitucional contra Nicolás Grau". Si el texto no dice de qué trata (por ejemplo, "Artículo 39, aprobado"), devuelve el alias vacío. Devuelve un alias por cada clave recibida.')
+
 def get(url, intentos=4):
     for i in range(intentos):
         try:
@@ -134,8 +140,11 @@ def senado():
                         if i not in parl: parl[i] = {'n': ' '.join(f"{p['NOMBRE']} {p['APELLIDO_PATERNO']} {p['APELLIDO_MATERNO']}".split()), 'p': 'S/I', 'pn': '', 's': '', 'r': 0}
                 tema = ' '.join((v['TEMA'] or '').split())
                 m = re.search(r'\b(aprobad[oa]|rechazad[oa])\b', tema, re.I)
-                votos.append({'id': str(v['ID_VOTACION']), 'f': f.strftime('%Y-%m-%dT%H:%M'), 'b': bol_norm(v['BOLETIN']), 'tipo': 'Proyecto de Ley' if v['BOLETIN'] else 'Otros',
-                              'd': '', 'art': tema[:400], 'tr': '', 'tv': '', 'q': v['QUORUM'] or '',
+                b = bol_norm(v['BOLETIN'])
+                if b and int(b.split('-')[0]) < 10000: b = None  # boletines S: designaciones, acusaciones, acuerdos y oficios
+                tipo = 'Proyecto de Ley' if b else next((k for k, r in TIPOS_SEN if re.search(r, tema, re.I)), 'Otros')
+                votos.append({'id': str(v['ID_VOTACION']), 'f': f.strftime('%Y-%m-%dT%H:%M'), 'b': b, 'tipo': tipo,
+                              'd': '', 'art': tema[:400] if b else tema[:1500], 'tr': '', 'tv': '', 'q': v['QUORUM'] or '',
                               'r': (m.group(1).capitalize()[:-1] + 'o') if m else resultado_sen(v['QUORUM'] or '', v['SI'] or 0, v['NO'] or 0), 'si': v['SI'] or 0, 'no': v['NO'] or 0, 'ab': v['ABS'] or 0, 'v': vv})
             off += len(d['data'])
             if not d['data'] or off >= d['total']: break
@@ -162,6 +171,30 @@ def proyectos(bols_recientes, todos):
             if d: prev[b] = d
     guardar(os.path.join(CACHE, 'proyectos.json'), prev)
     return prev
+
+# ---------- Alias (resumen breve del tema, generado con IA; solo si hay ANTHROPIC_API_KEY) ----------
+def alias(textos):
+    prev = leer('alias.json', {})
+    faltan = {k: t for k, t in textos.items() if t and k not in prev}
+    print('Alias:', len(textos), 'textos,', len(faltan), 'sin alias')
+    if faltan and os.environ.get('ANTHROPIC_API_KEY'):
+        import anthropic
+        cli = anthropic.Anthropic()
+        claves = sorted(faltan)
+        for i in range(0, len(claves), 40):
+            lote = {k: faltan[k][:600] for k in claves[i:i + 40]}
+            try:
+                r = cli.beta.messages.create(model='claude-opus-5-5', max_tokens=8000, betas=['server-side-fallback-2026-07-01'], fallbacks='default',
+                    output_config={'effort': 'low', 'format': {'type': 'json_schema', 'schema': {'type': 'object', 'properties': {'alias': {'type': 'array', 'items': {'type': 'object', 'properties': {'k': {'type': 'string'}, 'a': {'type': 'string'}}, 'required': ['k', 'a'], 'additionalProperties': False}}}, 'required': ['alias'], 'additionalProperties': False}}},
+                    system=PROMPT_ALIAS, messages=[{'role': 'user', 'content': json.dumps(lote, ensure_ascii=False)}])
+            except anthropic.APIConnectionError as e: print('  alias sin conexion', e); break
+            except anthropic.APIStatusError as e: print('  alias error', e.status_code, e.message); break
+            if r.stop_reason in ('refusal', 'max_tokens'): print('  alias detenido:', r.stop_reason); continue
+            txt = next((b.text for b in r.content if b.type == 'text'), '{}')
+            for o in json.loads(txt).get('alias', []):
+                if o['k'] in lote and o['a'].strip(): prev[o['k']] = o['a'].strip().rstrip('.')
+        guardar(os.path.join(CACHE, 'alias.json'), prev, compacto=False)
+    return {k: prev[k] for k in textos if k in prev}
 
 # ---------- Analisis ----------
 def analizar(parl, votos, cam):
@@ -248,6 +281,9 @@ def main():
     datos = {'actualizado': ahora.isoformat(timespec='minutes'), 'desde': DESDE.isoformat(), 'C': analizar(pc, vc, 'C'), 'S': analizar(ps, vs, 'S')}
     for b, f in fichas.items():
         if b in pr and f.get('ministerio'): pr[b]['min'] = f['ministerio']
+    textos = {'b:' + b: pr[b]['t'] for b in todos if b in pr and pr[b].get('t')} | {'S:' + v['id']: v['art'] for v in vs if not v['b'] and v['art']}
+    try: datos['alias'] = alias(textos)
+    except Exception as e: print('Alias con error:', e); datos['alias'] = {k: a for k, a in leer('alias.json', {}).items() if k in textos}
     guardar(os.path.join(OUT, 'congreso.json'), datos)
     guardar(os.path.join(OUT, 'proyectos.json'), {'actualizado': datos['actualizado'], 'p': {b: pr[b] for b in sorted(todos) if b in pr}})
     print('Listo', datos['actualizado'], {k: os.path.getsize(os.path.join(OUT, k)) // 1024 for k in os.listdir(OUT)}, 'KB')
