@@ -265,8 +265,8 @@ def main():
     ahora = dt.datetime.now(CL)
     if '--forzar' not in sys.argv:
         prev = os.path.join(OUT, 'congreso.json')
-        ult = json.load(open(prev, encoding='utf-8'))['actualizado'][:10] if os.path.exists(prev) else ''
-        if ahora.hour < 6 or ult == ahora.date().isoformat():
+        ult = json.load(open(prev, encoding='utf-8'))['actualizado'][:16] if os.path.exists(prev) else ''
+        if ahora.hour < 6 or ult >= ahora.strftime('%Y-%m-%dT06:00'):
             print('Fuera de horario o ya actualizado hoy:', ahora.isoformat(timespec='minutes')); return
     pc, vc, fichas = camara()
     ruta = os.path.join(OUT, 'congreso.json'); previo = json.load(open(ruta, encoding='utf-8')) if os.path.exists(ruta) else {}
