@@ -2,7 +2,8 @@ name: actualizar
 on:
   schedule:
     - cron: '0 9 * * *'   # 6:00 en horario de verano de Chile
-    - cron: '0 10 * * *'  # 6:00 en horario de invierno; el script descarta la que no corresponde
+    - cron: '0 10 * * *'  # 6:00 en horario de invierno
+    - cron: '0 12,15,18 * * *'  # respaldo si GitHub atrasa o salta la corrida; el script corre una sola vez al día
   workflow_dispatch:
 permissions:
   contents: write

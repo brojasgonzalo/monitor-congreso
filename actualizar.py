@@ -1,5 +1,5 @@
 # Monitor del Congreso: baja votaciones de la Camara y el Senado desde el 11-03-2026 y arma datos/congreso.json y datos/proyectos.json
-# Uso: python actualizar.py [--forzar]. Sin --forzar solo corre entre las 6 y las 8 (hora de Chile) si hoy no se ha actualizado.
+# Uso: python actualizar.py [--forzar]. Sin --forzar corre desde las 6 (hora de Chile) si hoy no se ha actualizado.
 import json, re, sys, os, time, urllib.request, datetime as dt
 import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
@@ -266,7 +266,7 @@ def main():
     if '--forzar' not in sys.argv:
         prev = os.path.join(OUT, 'congreso.json')
         ult = json.load(open(prev, encoding='utf-8'))['actualizado'][:10] if os.path.exists(prev) else ''
-        if not (6 <= ahora.hour < 8) or ult == ahora.date().isoformat():
+        if ahora.hour < 6 or ult == ahora.date().isoformat():
             print('Fuera de horario o ya actualizado hoy:', ahora.isoformat(timespec='minutes')); return
     pc, vc, fichas = camara()
     ruta = os.path.join(OUT, 'congreso.json'); previo = json.load(open(ruta, encoding='utf-8')) if os.path.exists(ruta) else {}
